@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=hypr-ovpn
+Comment=Tray OpenVPN client
+Exec=hypr-ovpn
+Icon=network-vpn
+Terminal=false
+Categories=Network;Settings;
+Keywords=vpn;openvpn;
+StartupNotify=false

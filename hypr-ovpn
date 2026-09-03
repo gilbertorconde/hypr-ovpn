@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Launcher: run the hypr_ovpn package from wherever this script lives.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+if [[ -d "$HERE/hypr_ovpn" ]]; then
+    export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+fi
+exec python3 -m hypr_ovpn "$@"
