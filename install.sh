@@ -10,7 +10,7 @@ mkdir -p "$BIN_DIR" "$APPS_DIR"
 ln -sf "$HERE/hypr-ovpn" "$BIN_DIR/hypr-ovpn"
 echo "installed launcher    -> $BIN_DIR/hypr-ovpn"
 
-sed "s|^Exec=.*|Exec=$HERE/hypr-ovpn|" "$HERE/hypr-ovpn.desktop" > "$APPS_DIR/hypr-ovpn.desktop"
+sed "s|^Exec=.*|Exec=$BIN_DIR/hypr-ovpn|" "$HERE/hypr-ovpn.desktop" > "$APPS_DIR/hypr-ovpn.desktop"
 echo "installed desktop file -> $APPS_DIR/hypr-ovpn.desktop"
 
 if [[ "${1:-}" == "--polkit" ]]; then
@@ -27,4 +27,4 @@ fi
 
 echo
 echo "autostart with Hyprland: add to hyprland.conf:"
-echo "    exec-once = $HERE/hypr-ovpn"
+echo "    exec-once = $BIN_DIR/hypr-ovpn"
