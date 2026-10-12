@@ -5,7 +5,7 @@ Usage:
     hypr-ovpn --settings           open the settings window
     hypr-ovpn --connect NAME       connect to a profile (great for Hyprland binds)
     hypr-ovpn --toggle NAME        connect/disconnect a profile
-    hypr-ovpn --disconnect         disconnect the active VPN
+    hypr-ovpn --disconnect [NAME]  disconnect one VPN (or all of them)
     hypr-ovpn --status             print the current status
 """
 
@@ -32,7 +32,9 @@ def _args_to_command(argv: list[str]) -> str | None:
     if "--settings" in argv:
         return "show"
     if "--disconnect" in argv:
-        return "disconnect"
+        i = argv.index("--disconnect")
+        name = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
+        return f"disconnect {name}".strip()
     if "--status" in argv:
         return "status"
     for flag in ("--connect", "--toggle"):

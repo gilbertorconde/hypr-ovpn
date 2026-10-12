@@ -247,7 +247,6 @@ class SettingsWindow(QMainWindow):
         if (item := self.list.currentItem()) is not None:
             selected_id = item.data(Qt.ItemDataRole.UserRole)
         self.list.clear()
-        active = self.controller.active_connection
         for p in self.controller.store.profiles:
             item = QListWidgetItem(self._item_text(p))
             item.setData(Qt.ItemDataRole.UserRole, p.id)
@@ -264,21 +263,18 @@ class SettingsWindow(QMainWindow):
         bits = [p.name]
         if p.username:
             bits.append(f"({p.username})")
-        conn = self.controller.active_connection
-        if conn and conn.profile.id == p.id:
-            bits.append("— " + self.controller.state_detail)
+        if conn := self.controller.connection_for(p):
+            bits.append("— " + conn.detail)
         return "  ".join(bits)
 
     def _item_icon(self, p: Profile) -> QIcon:
-        conn = self.controller.active_connection
-        if conn and conn.profile.id == p.id:
+        if conn := self.controller.connection_for(p):
             return icon_connected() if conn.state == State.CONNECTED else icon_busy()
         return icon_idle()
 
     def _update_buttons(self) -> None:
         p = self._selected()
-        conn = self.controller.active_connection
-        is_active = bool(p and conn and conn.profile.id == p.id)
+        is_active = bool(p and self.controller.connection_for(p))
         self.connect_btn.setText("Disconnect" if is_active else "Connect")
         self.connect_btn.setEnabled(p is not None)
         self.edit_btn.setEnabled(p is not None)

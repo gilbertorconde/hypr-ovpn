@@ -67,6 +67,8 @@ class VpnConnection(QObject):
         super().__init__(parent)
         self.profile = profile
         self.state = State.IDLE
+        self.detail = "Disconnected"
+        self.rx = self.tx = 0
         self.local_ip = ""
         self.username = profile.username
         self.password: str | None = None
@@ -192,7 +194,8 @@ class VpnConnection(QObject):
         elif line.startswith(">BYTECOUNT:"):
             try:
                 rx, tx = line[len(">BYTECOUNT:"):].split(",")
-                self.bytecount.emit(int(rx), int(tx))
+                self.rx, self.tx = int(rx), int(tx)
+                self.bytecount.emit(self.rx, self.tx)
             except ValueError:
                 pass
         elif line.startswith(">HOLD:"):
@@ -322,8 +325,10 @@ class VpnConnection(QObject):
     # ------------------------------------------------------------------ misc
 
     def _set_state(self, state: State, detail: str) -> None:
-        if state == self.state and detail == getattr(self, "_last_detail", None):
+        if state == self.state and detail == self.detail:
             return
         self.state = state
-        self._last_detail = detail
+        self.detail = detail
+        if state == State.IDLE:
+            self.rx = self.tx = 0
         self.state_changed.emit(state, detail)

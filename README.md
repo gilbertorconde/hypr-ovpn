@@ -9,8 +9,10 @@ optional password, and the VPN becomes a one-click entry in the tray menu.
 - **Tray icon** (StatusNotifierItem — works with waybar's `tray` module) with
   color-coded state: gray = disconnected, blinking amber = connecting,
   green = connected. Left-click opens settings, right-click the menu.
-- **Fast connect** from the tray menu; picking another VPN while connected
-  switches cleanly (disconnect, then connect). One VPN at a time.
+- **Fast connect** from the tray menu: each VPN is a checkbox that toggles it.
+  Several VPNs can be connected at the same time (each gets its own `tun`
+  device); the tray icon is amber while any of them is busy, green while at
+  least one is up.
 - **Profiles** like the Android client: name, `.ovpn` config (chosen with the
   native system file picker via xdg-desktop-portal), username, optional
   password. Self-contained configs are imported (copied) so the original file
@@ -60,7 +62,8 @@ CLI control of the running instance (handy for Hyprland keybinds):
 ```sh
 hypr-ovpn --toggle Work        # connect/disconnect the profile named "Work"
 hypr-ovpn --connect Work
-hypr-ovpn --disconnect
+hypr-ovpn --disconnect Work    # disconnect just "Work"
+hypr-ovpn --disconnect         # disconnect everything
 hypr-ovpn --status
 hypr-ovpn --settings
 ```
@@ -68,6 +71,11 @@ hypr-ovpn --settings
 e.g. `bind = $mainMod, V, exec, hypr-ovpn --toggle Work`
 
 ## Notes
+
+- **Running several VPNs**: the app doesn't arbitrate between them. If two
+  configs both push a default route (`redirect-gateway`) or overlapping
+  subnets, whichever came up last wins for that traffic — use split-tunnel
+  configs when you need more than one up.
 
 - **DNS**: OpenVPN 2.7 applies pushed DNS servers through its bundled
   `dns-updown` script (systemd-resolved aware). If DNS doesn't switch after

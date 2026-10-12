@@ -1,5 +1,5 @@
-"""Application controller: owns the profile store, the single active
-connection, the tray icon, and the windows."""
+"""Application controller: owns the profile store, the active connections
+(any number at once, one per profile), the tray icon, and the windows."""
 
 from __future__ import annotations
 
@@ -26,10 +26,7 @@ class Controller(QObject):
         super().__init__()
         self.app = app
         self.store = ProfileStore()
-        self.active_connection: VpnConnection | None = None
-        self._pending_profile: Profile | None = None
-        self.state_detail = "Disconnected"
-        self._rx = self._tx = 0
+        self.connections: dict[str, VpnConnection] = {}   # profile id -> connection
         self._log_lines: list[str] = []
         self._quitting = False
 
@@ -46,68 +43,64 @@ class Controller(QObject):
         for p in self.store.profiles:
             if p.autoconnect:
                 self.connect_profile(p)
-                break
 
     def quit(self) -> None:
-        if self.active_connection is not None and not self._quitting:
+        if self.connections and not self._quitting:
             self._quitting = True
             self.notify("Disconnecting before exit…")
-            self.active_connection.stop()
+            self.disconnect_all()
             QTimer.singleShot(8000, self.app.quit)  # safety net
             return
         self.app.quit()
 
     # ------------------------------------------------------------ connecting
 
+    def connection_for(self, profile: Profile) -> VpnConnection | None:
+        return self.connections.get(profile.id)
+
     def toggle_profile(self, profile: Profile) -> None:
-        conn = self.active_connection
-        if conn is not None and conn.profile.id == profile.id:
-            self.disconnect_active()
+        if profile.id in self.connections:
+            self.disconnect_profile(profile)
         else:
             self.connect_profile(profile)
 
     def connect_profile(self, profile: Profile) -> None:
-        if self.active_connection is not None:
-            # One VPN at a time: switch by disconnecting first, then starting.
-            self._pending_profile = profile
-            self.active_connection.stop()
-            return
+        if profile.id in self.connections:
+            return  # already up (or on its way up / down)
         conn = VpnConnection(profile, self)
-        self.active_connection = conn
-        self._rx = self._tx = 0
+        self.connections[profile.id] = conn
         if profile.has_saved_password:
             saved = secrets_store.lookup(profile.id)
             if saved is not None:
                 conn.password = saved
-        conn.state_changed.connect(self._on_state_changed)
-        conn.log_line.connect(self._on_log_line)
-        conn.credentials_needed.connect(self._on_credentials_needed)
-        conn.finished.connect(self._on_finished)
-        conn.bytecount.connect(self._on_bytecount)
+        conn.state_changed.connect(lambda state, _d, c=conn: self._on_state_changed(c, state))
+        conn.log_line.connect(lambda line, c=conn: self._on_log_line(c, line))
+        conn.credentials_needed.connect(
+            lambda need, wants, retry, c=conn: self._on_credentials_needed(c, need, wants, retry))
+        conn.finished.connect(lambda user, reason, c=conn: self._on_finished(c, user, reason))
+        conn.bytecount.connect(lambda _rx, _tx: self.tray.setToolTip(f"hypr-ovpn\n{self.status_text()}"))
         conn.start()
 
-    def disconnect_active(self) -> None:
-        self._pending_profile = None
-        if self.active_connection is not None:
-            self.active_connection.stop()
+    def disconnect_profile(self, profile: Profile) -> None:
+        conn = self.connections.get(profile.id)
+        if conn is not None:
+            conn.stop()
+
+    def disconnect_all(self) -> None:
+        for conn in list(self.connections.values()):
+            conn.stop()
 
     # --------------------------------------------------------------- signals
 
-    def _on_state_changed(self, state: State, detail: str) -> None:
-        self.state_detail = detail
+    def _on_state_changed(self, conn: VpnConnection, state: State) -> None:
         if state == State.CONNECTED:
-            conn = self.active_connection
             self.notify(f"Connected to {conn.profile.name}"
                         + (f" ({conn.local_ip})" if conn.local_ip else ""))
         self._refresh_ui()
 
-    def _on_bytecount(self, rx: int, tx: int) -> None:
-        self._rx, self._tx = rx, tx
-        self.tray.setToolTip(self.status_text())
-
-    def _on_credentials_needed(self, need: str, wants_username: bool, is_retry: bool) -> None:
-        conn = self.active_connection
-        if conn is None:
+    def _on_credentials_needed(self, conn: VpnConnection, need: str,
+                               wants_username: bool, is_retry: bool) -> None:
+        if self.connections.get(conn.profile.id) is not conn:
             return
         if is_retry:
             self.notify(f"{conn.profile.name}: authentication failed", error=True)
@@ -133,30 +126,27 @@ class Controller(QObject):
         else:
             conn.cancel_credentials()
 
-    def _on_finished(self, user_requested: bool, reason: str) -> None:
-        conn = self.active_connection
-        self.active_connection = None
-        self.state_detail = "Disconnected"
-        self._rx = self._tx = 0
-        if conn is not None and not user_requested and not self._quitting:
-            name = conn.profile.name
-            if reason == "auth-failure":
-                self.notify(f"{name}: authentication failed", error=True)
-            elif reason:
-                self.notify(f"{name}: disconnected ({reason})", error=True)
-            else:
-                self.notify(f"{name}: disconnected")
-        elif user_requested and conn is not None and not self._quitting:
-            self.notify(f"Disconnected from {conn.profile.name}")
-        self._refresh_ui()
+    def _on_finished(self, conn: VpnConnection, user_requested: bool, reason: str) -> None:
+        if self.connections.get(conn.profile.id) is conn:
+            del self.connections[conn.profile.id]
+        name = conn.profile.name
         if self._quitting:
-            self.app.quit()
+            if not self.connections:
+                self.app.quit()
             return
-        if self._pending_profile is not None:
-            pending, self._pending_profile = self._pending_profile, None
-            self.connect_profile(pending)
+        if user_requested:
+            self.notify(f"Disconnected from {name}")
+        elif reason == "auth-failure":
+            self.notify(f"{name}: authentication failed", error=True)
+        elif reason:
+            self.notify(f"{name}: disconnected ({reason})", error=True)
+        else:
+            self.notify(f"{name}: disconnected")
+        self._refresh_ui()
 
-    def _on_log_line(self, line: str) -> None:
+    def _on_log_line(self, conn: VpnConnection, line: str) -> None:
+        if len(self.connections) > 1:
+            line = f"[{conn.profile.name}] {line}"
         self._log_lines.append(line)
         if len(self._log_lines) > 5000:
             del self._log_lines[:1000]
@@ -165,18 +155,27 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------- ui
 
-    def status_text(self) -> str:
-        conn = self.active_connection
-        if conn is None:
-            return "Disconnected"
-        text = f"{conn.profile.name}: {self.state_detail}"
-        if conn.state == State.CONNECTED and (self._rx or self._tx):
-            text += f"  ↓{_human_bytes(self._rx)} ↑{_human_bytes(self._tx)}"
+    def connection_status(self, conn: VpnConnection) -> str:
+        text = f"{conn.profile.name}: {conn.detail}"
+        if conn.state == State.CONNECTED and (conn.rx or conn.tx):
+            text += f"  ↓{_human_bytes(conn.rx)} ↑{_human_bytes(conn.tx)}"
         return text
 
+    def status_text(self) -> str:
+        if not self.connections:
+            return "Disconnected"
+        return "\n".join(self.connection_status(c) for c in self.connections.values())
+
+    def overall_state(self) -> State:
+        """Busy if any connection is in transition, else connected if any is up."""
+        states = {c.state for c in self.connections.values()}
+        for busy in (State.STARTING, State.CONNECTING, State.RECONNECTING, State.DISCONNECTING):
+            if busy in states:
+                return busy
+        return State.CONNECTED if State.CONNECTED in states else State.IDLE
+
     def _refresh_ui(self) -> None:
-        state = self.active_connection.state if self.active_connection else State.IDLE
-        self.tray.update_state(state, f"hypr-ovpn — {self.status_text()}")
+        self.tray.update_state(self.overall_state(), f"hypr-ovpn\n{self.status_text()}")
         if self.settings_window is not None and self.settings_window.isVisible():
             self.settings_window.refresh()
 
@@ -233,7 +232,13 @@ class Controller(QObject):
             self.show_settings()
             return "OK"
         if verb == "disconnect":
-            self.disconnect_active()
+            if not arg:
+                self.disconnect_all()
+                return "OK"
+            profile = self.store.find_by_name(arg)
+            if profile is None:
+                return f"ERR no profile named '{arg}'"
+            self.disconnect_profile(profile)
             return "OK"
         if verb == "status":
             return self.status_text()

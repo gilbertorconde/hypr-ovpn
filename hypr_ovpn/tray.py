@@ -33,13 +33,15 @@ class Tray(QSystemTrayIcon):
         c = self.controller
         self.menu.clear()
 
-        status = QAction(c.status_text(), self.menu)
-        status.setEnabled(False)
-        self.menu.addAction(status)
+        for line in c.status_text().splitlines():
+            status = QAction(line, self.menu)
+            status.setEnabled(False)
+            self.menu.addAction(status)
 
-        if c.active_connection is not None:
-            disconnect = QAction("Disconnect", self.menu)
-            disconnect.triggered.connect(c.disconnect_active)
+        if c.connections:
+            label = "Disconnect all" if len(c.connections) > 1 else "Disconnect"
+            disconnect = QAction(label, self.menu)
+            disconnect.triggered.connect(c.disconnect_all)
             self.menu.addAction(disconnect)
 
         self.menu.addSeparator()
@@ -51,8 +53,7 @@ class Tray(QSystemTrayIcon):
         for p in c.store.profiles:
             action = QAction(p.name, self.menu)
             action.setCheckable(True)
-            active = c.active_connection is not None and c.active_connection.profile.id == p.id
-            action.setChecked(active)
+            action.setChecked(c.connection_for(p) is not None)
             action.triggered.connect(lambda _c, prof=p: c.toggle_profile(prof))
             self.menu.addAction(action)
 
